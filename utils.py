@@ -16,28 +16,6 @@ def name_formula(name):
                  'photo': 'Photo'}
     return name_dict[name]
 
-
-def cal_nei_index(name, ei, k, num_nodes, include_self=1):
-    if include_self:
-        path_name = f'index/{name}_hop{k}.npy'
-    else:
-        path_name = f'index/{name}_hop{k}_noself.npy'
-    if os.path.exists(path_name):
-        neigh_dict = np.load(path_name, allow_pickle=True).item()
-    else:
-        neigh_dict = {}
-        for id in trange(num_nodes):
-            # neigh = k_hop_subgraph(id, k, ei)[0]
-            # exclude self
-            if include_self:
-                neigh = k_hop_subgraph(id, k, ei)[0]
-            else:
-                neigh = k_hop_subgraph(id, k, ei)[0][1:]
-            neigh_dict[id] = neigh
-        np.save(path_name, neigh_dict)
-    return neigh_dict
-
-
 # bounded with cal_nei_index
 def cal_hn(nei_dict, y, device, thres=0.5, soft=False):
     hn = np.empty(len(y), dtype=float)

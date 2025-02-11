@@ -103,54 +103,78 @@ def cal_nc(nei_dict, y, thres=2., use_tensor=True):
     mask = np.where(nc <= thres, 1., 0.)
     return torch.from_numpy(mask).float().to(device)
 
+def load_ncgnn_models(num_features, num_classes, args, device):
+    model = NCGCN(num_features, num_classes, args).to(device)
+    model.reset_parameters()
+    criterion = torch.nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.wd)
+    
+    models = {
+        "model" : model,
+        "criterion" : criterion,
+        "optimizer" : optimizer,
+    }
+    
+    return models
 
-
-
-if __name__ == "__main__":
-    args = get_ncgnn_args()
-
-    dataset, data = DataLoader(args.dataset)
-    # print(f"load {args.dataset} successfully!")
-    # print('==============================================================')
-
-    # warnings.filterwarnings("ignore")
-
-    args_dict = vars(args)
-    args = argparse.Namespace(**args_dict)
-
-    args.threshold = 2 ** (args.threshold / 10 * np.log2(dataset.num_classes))
-    print(args)
-
-    device = torch.device(f"cuda:{args.device}")
-
+def load_ncgnn_datas(args, device, num_nodes, num_classes, data):
     train_rate = 0.6
     val_rate = 0.2
     # dataset split
     if args.dataset == 'penn94':
         num_nodes = torch.count_nonzero(data.y + 1).item()
-    else:
-        num_nodes = dataset.num_nodes
-    percls_trn = int(round(train_rate * num_nodes / dataset.num_classes))
-    val_lb = int(round(val_rate * num_nodes))
-    accs, test_accs = [], []
-    ep_list = []
-    model = NCGCN(dataset.num_features, dataset.num_classes, args).to(device)
-    data.x = SparseTensor.from_dense(data.x)
 
+    percls_trn = int(round(train_rate * num_nodes / num_classes))
+    val_lb = int(round(val_rate * num_nodes))
+    data.x = SparseTensor.from_dense(data.x)
     # 10 times rand part
-    neigh_dict = cal_nei_index(data.edge_index, args.hops, dataset.num_nodes)
+    seed_everything(args.seed)
+    neigh_dict = cal_nei_index(data.edge_index, args.hops, num_nodes)
     print('indexing finished')
   
     # training settings
-    seed_everything(args.seed)
-    data.cc_mask = torch.ones(dataset.num_nodes).float()
-    data = gpr_splits(data, dataset.num_nodes, dataset.num_classes, percls_trn, val_lb).to(device)
-    model.reset_parameters()
-    criterion = torch.nn.CrossEntropyLoss()
-
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.wd)
+    # seed_everything(args.seed)
+    data.cc_mask = torch.ones(num_nodes).float()
+    data = gpr_splits(data, num_nodes, num_classes, percls_trn, val_lb).to(device) # 生成三个mask
     data.update_cc = True
+    
+    datas = {
+        "data" : data,
+        "neigh_dict" : neigh_dict,
+    }
+    
+    return datas
 
+if __name__ == "__main__":
+    args = get_ncgnn_args()
+
+    num_nodes, num_classes, num_features, data = DataLoader(args.dataset)
+
+    print(data) # x,y,edge_index
+    print(data.x.dtype) # torch.float32
+    print(data.y.dtype) # torch.int64
+    print(data.edge_index.dtype) # torch.int64
+    # print(f"load {args.dataset} successfully!")
+    # print('==============================================================')
+    # warnings.filterwarnings("ignore")
+    args_dict = vars(args)
+    args = argparse.Namespace(**args_dict)
+    args.threshold = 2 ** (args.threshold / 10 * np.log2(num_classes))
+    print(args)
+
+    device = torch.device(f"cuda:{args.device}")
+
+    datas = load_ncgnn_datas(args, device, num_nodes, num_classes, data)
+    data = datas["data"]
+    neigh_dict = datas["neigh_dict"]
+
+    models = load_ncgnn_models(num_features, num_classes, args, device)
+    model = models["model"]
+    criterion = models["criterion"]
+    optimizer = models["optimizer"]
+
+    accs, test_accs = [], []
+    ep_list = []
     best_acc = 0.
     final_test_acc = 0.
     es_count = patience = 100

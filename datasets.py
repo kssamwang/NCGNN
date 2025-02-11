@@ -171,12 +171,12 @@ def DataLoader(name):
         root_path = './data'
         dataset = NPZ(root_path, name, pre_transform=T.NormalizeFeatures())
         dataset.num_nodes = len(dataset[0].y)
-        return dataset, dataset.data
+        return dataset.num_nodes, dataset.num_classes, dataset.num_features, dataset.data
     elif name in ['penn94', 'genius']:
         root_path = './data/'
         dataset = LINKXDataset(root_path, name, pre_transform=T.NormalizeFeatures())
         dataset.num_nodes = len(dataset[0].y)
-        return dataset, dataset.data
+        return dataset.num_nodes, dataset.num_classes, dataset.num_features, dataset.data
 
     elif name in ['cora', 'citeseer', 'pubmed']:
         root_path = './'
@@ -199,7 +199,7 @@ def DataLoader(name):
         edge_index = to_undirected(edge_index, num_nodes=data.x.size(0))
         data.edge_index, _ = coalesce(edge_index, None, data.x.size(0), data.x.size(0))
         dataset.num_nodes = len(data.y)
-        return dataset, data
+        return dataset.num_nodes, dataset.num_classes, dataset.num_features, data
 
     elif name in ['film']:
         dataset = Actor(
@@ -212,7 +212,7 @@ def DataLoader(name):
         dataset = PygNodePropPredDataset(root=root_path, name=name)
         data = dataset[0]
         data.y = data.y.squeeze()
-        return data, dataset
+        return dataset.num_nodes, dataset.num_classes, dataset.num_features, data
     elif name in ["Flickr"]:
         root_path = './data'
         dataset = Flickr(root=root_path + "/Flickr")
@@ -233,7 +233,7 @@ def DataLoader(name):
             "num_node_features": data.x.shape[1]
         }
         dataset = DotDict(dataset)
-        return dataset, data
+        return dataset.num_nodes, dataset.num_classes, dataset.num_features,  data
     elif name in ['cora_full']:
         data = read_npz(osp.join('./data', name + '.npz'))
         data = Data(x=data.x, y=data.y, edge_index=data.edge_index)
@@ -242,11 +242,11 @@ def DataLoader(name):
             "num_node_features": data.x.shape[1]
         }
         dataset = DotDict(dataset)
-        return dataset, data
+        return dataset.num_nodes, dataset.num_classes, dataset.num_features,  data
     else:
         raise ValueError(f'dataset {name} not supported in dataloader')
     dataset.num_nodes = len(dataset[0].y)
-    return dataset, dataset[0]
+    return dataset.num_nodes, dataset.num_classes, dataset.num_features, dataset[0]
 
 
 class DotDict(dict):

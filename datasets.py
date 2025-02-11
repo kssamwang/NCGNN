@@ -173,27 +173,27 @@ def DataLoader(name):
         dataset.num_nodes = len(dataset[0].y)
         return dataset, dataset.data
     elif name in ['penn94', 'genius']:
-        root_path = '../data/'
+        root_path = './data/'
         dataset = LINKXDataset(root_path, name, pre_transform=T.NormalizeFeatures())
         dataset.num_nodes = len(dataset[0].y)
         return dataset, dataset.data
 
     elif name in ['cora', 'citeseer', 'pubmed']:
-        root_path = '../'
+        root_path = './'
         # path = osp.join(root_path, 'data', name)
         path = osp.join(root_path, 'data')
         dataset = Planetoid(path, name, pre_transform=T.NormalizeFeatures())
     elif name in ['computers', 'photo']:
-        root_path = '../'
+        root_path = './'
         path = osp.join(root_path, 'data', name)
         dataset = Amazon(path, name, pre_transform=T.NormalizeFeatures())
     elif name in ['chameleon', 'squirrel']:
         # use everything from "geom_gcn_preprocess=False" and
         # only the node label y from "geom_gcn_preprocess=True"
         preProcDs = WikipediaNetwork(
-            root='../data/', name=name, geom_gcn_preprocess=False, pre_transform=T.NormalizeFeatures())
+            root='./data/', name=name, geom_gcn_preprocess=False, pre_transform=T.NormalizeFeatures())
         dataset = WikipediaNetwork(
-            root='../data/', name=name, geom_gcn_preprocess=True, pre_transform=T.NormalizeFeatures())
+            root='./data/', name=name, geom_gcn_preprocess=True, pre_transform=T.NormalizeFeatures())
         data = dataset[0]
         edge_index, _ = remove_self_loops(preProcDs[0].edge_index)
         edge_index = to_undirected(edge_index, num_nodes=data.x.size(0))
@@ -203,18 +203,18 @@ def DataLoader(name):
 
     elif name in ['film']:
         dataset = Actor(
-            root='../data/film', pre_transform=T.NormalizeFeatures())
+            root='./data/film', pre_transform=T.NormalizeFeatures())
     elif name in ['texas', 'cornell']:
-        dataset = WebKB(root='../data/',
+        dataset = WebKB(root='./data/',
                         name=name, pre_transform=T.NormalizeFeatures())
     elif name in ["ogbn-arxiv"]:
-        root_path = '../data'
+        root_path = './data'
         dataset = PygNodePropPredDataset(root=root_path, name=name)
         data = dataset[0]
         data.y = data.y.squeeze()
         return data, dataset
     elif name in ["Flickr"]:
-        root_path = '../data'
+        root_path = './data'
         dataset = Flickr(root=root_path + "/Flickr")
     elif name in ['chameleon_f', 'squirrel_f']:
         data = np.load(osp.join('./data', name + 'iltered_directed.npz'))

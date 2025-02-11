@@ -4,8 +4,8 @@ import numpy as np
 import random
 
 
-class Config:
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+# class Config:
+#     device = 'cuda:3' if torch.cuda.is_available() else 'cpu'
 
 
 def seed_everything(seed):

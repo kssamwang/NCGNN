@@ -6,9 +6,10 @@ from datasets import DataLoader
 from utils import gpr_splits
 from models import *
 import argparse
+from parse import get_ncgnn_args
 import numpy as np
 
-from config import Config, seed_everything
+from config import seed_everything
 
 
 def train(data):
@@ -41,7 +42,7 @@ def run_full_data(data, forcing=0):
     if forcing:
         print('use forcing...')
         pred = data.y.detach().view(-1, 1) * mask + pred * ~mask
-    onehot = torch.zeros(out.shape, device=Config.device)
+    onehot = torch.zeros(out.shape, device=device)
     onehot.scatter_(1, pred, 1)
 
     return onehot
@@ -100,39 +101,27 @@ def cal_nc(nei_dict, y, thres=2., use_tensor=True):
 
     # low_cc: 1 ; high_cc: 0
     mask = np.where(nc <= thres, 1., 0.)
-    return torch.from_numpy(mask).float().to(Config.device)
+    return torch.from_numpy(mask).float().to(device)
 
 
 
 
 if __name__ == "__main__":
-    # PARSER BLOCK
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset', '-D', type=str, default='pubmed')
-    parser.add_argument('--baseseed', '-S', type=int, default=42)
-    parser.add_argument('--hidden', '-H', type=int, default=64)
-    parser.add_argument('--lr', type=float, default=0.1)
-    parser.add_argument('--wd', type=float, default=0.0001)
-    parser.add_argument('--dp1', type=float, default=0.5)
-    parser.add_argument('--dp2', type=float, default=0.5)
-    parser.add_argument('--act', type=str, default='relu')
-    parser.add_argument('--hops', type=int, default=1)
-    parser.add_argument('--forcing', type=int, default=0, choices=[0, 1])
-    parser.add_argument('--addself', '-A', type=int, default=1, choices=[0, 1])
-    parser.add_argument('--model', '-M', type=str, default='NCGNN')
-    parser.add_argument('--threshold', '-T', type=float, default=3)
-    args = parser.parse_args()
-    dataset, data = DataLoader(args.dataset)
-    print(f"load {args.dataset} successfully!")
-    print('==============================================================')
+    args = get_ncgnn_args()
 
-    warnings.filterwarnings("ignore")
+    dataset, data = DataLoader(args.dataset)
+    # print(f"load {args.dataset} successfully!")
+    # print('==============================================================')
+
+    # warnings.filterwarnings("ignore")
 
     args_dict = vars(args)
     args = argparse.Namespace(**args_dict)
 
     args.threshold = 2 ** (args.threshold / 10 * np.log2(dataset.num_classes))
     print(args)
+
+    device = torch.device(f"cuda:{args.device}")
 
     train_rate = 0.6
     val_rate = 0.2
@@ -145,46 +134,40 @@ if __name__ == "__main__":
     val_lb = int(round(val_rate * num_nodes))
     accs, test_accs = [], []
     ep_list = []
-    model = NCGCN(dataset.num_features, dataset.num_classes, args).to(Config.device)
+    model = NCGCN(dataset.num_features, dataset.num_classes, args).to(device)
     data.x = SparseTensor.from_dense(data.x)
 
     # 10 times rand part
     neigh_dict = cal_nei_index(data.edge_index, args.hops, dataset.num_nodes)
     print('indexing finished')
-    for rand in trange(10):
-        # training settings
-        seed_everything(args.baseseed + rand)
-        data.cc_mask = torch.ones(dataset.num_nodes).float()
-        data = gpr_splits(data, dataset.num_classes, percls_trn, val_lb).to(Config.device)
-        model.reset_parameters()
-        criterion = torch.nn.CrossEntropyLoss()
+  
+    # training settings
+    seed_everything(args.seed)
+    data.cc_mask = torch.ones(dataset.num_nodes).float()
+    data = gpr_splits(data, dataset.num_nodes, dataset.num_classes, percls_trn, val_lb).to(device)
+    model.reset_parameters()
+    criterion = torch.nn.CrossEntropyLoss()
 
-        optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.wd)
-        data.update_cc = True
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.wd)
+    data.update_cc = True
 
-        best_acc = 0.
-        final_test_acc = 0.
-        es_count = patience = 100
-        for epoch in range(500):
-            loss, out = train(data)
-            data.update_cc = False
-            val_acc = valid(data)
-            test_acc = test(data)
-            if val_acc > best_acc:
-                es_count = patience
-                best_acc = val_acc
-                final_test_acc = test_acc
-                predict = run_full_data(data, args.forcing)
-                data.cc_mask = cal_nc(neigh_dict, predict.detach().cpu(), args.threshold)
-                data.update_cc = True
-            else:
-                es_count -= 1
-            if es_count <= 0:
-                break
-
-        accs.append(best_acc)
-        test_accs.append(final_test_acc)
-    accs = torch.tensor(accs)
-    test_accs = torch.tensor(test_accs)
-    print(f'{args.dataset} valid_acc: {100 * accs.mean().item():.2f} ± {100 * accs.std().item():.2f}')
-    print(f'{args.dataset} test_acc: {100 * test_accs.mean().item():.2f} ± {100 * test_accs.std().item():.2f}')
+    best_acc = 0.
+    final_test_acc = 0.
+    es_count = patience = 100
+    for epoch in range(500):
+        loss, out = train(data)
+        data.update_cc = False
+        val_acc = valid(data)
+        test_acc = test(data)
+        if val_acc > best_acc:
+            es_count = patience
+            best_acc = val_acc
+            final_test_acc = test_acc
+            predict = run_full_data(data, args.forcing)
+            data.cc_mask = cal_nc(neigh_dict, predict.detach().cpu(), args.threshold)
+            data.update_cc = True
+        else:
+            es_count -= 1
+        if es_count <= 0:
+            break
+    print("Test acc:",final_test_acc)

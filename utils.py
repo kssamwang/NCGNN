@@ -7,7 +7,6 @@ from tqdm import trange
 import numpy as np
 from torch_geometric.utils import k_hop_subgraph
 import os
-from config import Config
 
 
 def name_formula(name):
@@ -40,7 +39,7 @@ def cal_nei_index(name, ei, k, num_nodes, include_self=1):
 
 
 # bounded with cal_nei_index
-def cal_hn(nei_dict, y, thres=0.5, soft=False):
+def cal_hn(nei_dict, y, device, thres=0.5, soft=False):
     hn = np.empty(len(y), dtype=float)
     for i, neigh in nei_dict.items():
         labels = torch.index_select(y, 0, neigh)
@@ -53,7 +52,7 @@ def cal_hn(nei_dict, y, thres=0.5, soft=False):
     if soft:
         return hn
     mask = np.where(hn <= thres, 1., 0.)
-    return torch.from_numpy(mask).float().to(Config.device)
+    return torch.from_numpy(mask).float().to(device)
 
 
 def cal_h(nei_dict, y):
@@ -68,7 +67,7 @@ def cal_h(nei_dict, y):
     # low_cc: 1 ; high_cc: 0
 
 
-def cal_mode(nei_dict, y, thres=2., use_tensor=True, soft=False):
+def cal_mode(nei_dict, y, device, thres=2., use_tensor=True, soft=False):
     cc = np.empty(y.shape[0])
     y = torch.argmax(y,dim=-1)
     for i, neigh in nei_dict.items():
@@ -80,17 +79,17 @@ def cal_mode(nei_dict, y, thres=2., use_tensor=True, soft=False):
         #    cc[i] = 1.0
 
     if soft:
-        return torch.from_numpy(cc).float().to(Config.device)
+        return torch.from_numpy(cc).float().to(device)
     # low_cc: 1 ; high_cc: 0
     # mask = np.where(cc <= thres, 1., 0.)
     mask=cc
     if use_tensor:
-        return torch.from_numpy(mask).float().to(Config.device)
+        return torch.from_numpy(mask).float().to(device)
     else:
         return mask
 
 
-def cal_cc(nei_dict, y, thres=2., use_tensor=True):
+def cal_cc(nei_dict, y, device, thres=2., use_tensor=True):
     cc = np.empty(y.shape[0])
     for i, neigh in nei_dict.items():
         labels = torch.index_select(y, 0, neigh)
@@ -104,7 +103,7 @@ def cal_cc(nei_dict, y, thres=2., use_tensor=True):
     # low_cc: 1 ; high_cc: 0
     mask = np.where(cc <= thres, 1., 0.)
     if use_tensor:
-        return torch.from_numpy(mask).float().to(Config.device)
+        return torch.from_numpy(mask).float().to(device)
     else:
         return mask
 
@@ -138,7 +137,7 @@ def random_planetoid_splits(data, num_classes, percls_trn=20, val_lb=500):
         rest_index[val_lb:], size=data.num_nodes)
 
     return data
-def gpr_splits(data, num_classes, percls_trn=20, val_lb=500):
+def gpr_splits(data, num_nodes, num_classes, percls_trn=20, val_lb=500):
     # Set new random planetoid splits:
     # * round(train_rate*len(data)/num_classes) * num_classes labels for training
     # * val_rate*len(data) labels for validation
@@ -155,10 +154,10 @@ def gpr_splits(data, num_classes, percls_trn=20, val_lb=500):
     rest_index = torch.cat([i[percls_trn:] for i in indices], dim=0)
     rest_index = rest_index[torch.randperm(rest_index.size(0))]
 
-    data.train_mask = index_to_mask(train_index, size=data.num_nodes)
-    data.val_mask = index_to_mask(rest_index[:val_lb], size=data.num_nodes)
+    data.train_mask = index_to_mask(train_index, size=num_nodes)
+    data.val_mask = index_to_mask(rest_index[:val_lb], size=num_nodes)
     data.test_mask = index_to_mask(
-        rest_index[val_lb:], size=data.num_nodes)
+        rest_index[val_lb:], size=num_nodes)
 
     return data
 

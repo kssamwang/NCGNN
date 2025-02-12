@@ -17,5 +17,6 @@ def get_ncgnn_args():
     parser.add_argument('--model', '-M', type=str, default='NCGNN')
     parser.add_argument('--threshold', '-T', type=float, default=3)
     parser.add_argument('--device', type=int, default=0)
+    parser.add_argument('--epochs', type=int, default=500)
     args = parser.parse_args()
     return args

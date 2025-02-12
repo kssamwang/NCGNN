@@ -1,9 +1,6 @@
 import warnings
 import os
 import torch
-import torch_scatter
-from tqdm import trange
-from torch_geometric.utils import k_hop_subgraph
 from datasets import DataLoader
 from utils import gpr_splits
 from models import *
@@ -13,8 +10,13 @@ import numpy as np
 import time
 from config import seed_everything
 
+from utils import (start_logger, close_logger, cal_nei_index, cal_nc)
+from metrics import accuracy, micro_f1, macro_f1, roc_auc, bacc, per_class_acc, headtail_acc
 
-def train(data):
+def train(data, models):
+    model = models["model"]
+    criterion = models["criterion"]
+    optimizer = models["optimizer"]
     model.train()
     optimizer.zero_grad()
     out = model(data)
@@ -25,18 +27,51 @@ def train(data):
 
 
 @torch.no_grad()
-def test(data):
+def test(data, models):
+    model = models["model"]
+    criterion = models["criterion"]
+    # optimizer = models["optimizer"]
     model.eval()
     out = model(data)
-    pred = out.argmax(dim=1)  # Use the class with highest probability.
-    test_correct = pred[data.test_mask] == data.y[data.test_mask]  # Check against ground-truth labels.
-    test_acc = int(test_correct.sum()) / int(data.test_mask.sum())  # Derive ratio of correct predictions.
+    test_loss = criterion(out[data.test_mask], data.y[data.test_mask])
+    test_acc = accuracy(out[data.test_mask], data.y[data.test_mask])
+    test_bacc = bacc(out, data.y, data.test_mask)
+    test_maf1 = macro_f1(out, data.y, data.test_mask)
+    test_mif1 = micro_f1(out, data.y, data.test_mask)
+    # test_rocauc = roc_auc(out, data.y, data.test_mask)
+    acc_per_class = per_class_acc(out, data.y, data.test_mask)
+    #acc_headtail = headtail_acc(out, data.y, data.test_mask, data.tail_mask)
+    test_results = {
+        "loss": test_loss,
+        "acc": test_acc,
+        "bacc": test_bacc,
+        "micro_f1": test_mif1,
+        "macro_f1": test_maf1,
+        # "rocauc": test_rocauc, #TODO
+        "rocauc": 0.00,
+        "acc_per_class": acc_per_class,
+        #"acc_headtail": acc_headtail,
+    }
+    return test_results
 
-    return test_acc
-
+def test_ncgnn_model(logger, data, models):
+    test_results = test(data, models)
+    log =   "Test set results: " + \
+            "loss: {:.4f} ".format(test_results["loss"].item()) + \
+            "accuracy: {:.4f} ".format(test_results["acc"]) + \
+            "micro_f1: {:.4f} ".format(test_results["micro_f1"]) + \
+            "macro_f1: {:.4f} ".format(test_results["macro_f1"]) + \
+            "rocauc: {:.4f} ".format(test_results["rocauc"]) + \
+            "bacc: {:.4f} ".format(test_results["bacc"])
+    logger.info(log)
+    for cls in test_results["acc_per_class"].keys():
+        acc = test_results["acc_per_class"][cls]
+        logger.info(f"test_acc of class #{cls} : {acc:4f}")
+    return test_results
 
 @torch.no_grad()
-def run_full_data(data, forcing=0):
+def run_full_data(data, models, forcing=0):
+    model = models["model"]
     model.eval()
     mask = data.train_mask.detach().view(-1, 1)
     out = model(data)
@@ -51,55 +86,16 @@ def run_full_data(data, forcing=0):
 
 
 @torch.no_grad()
-def valid(data):
+def valid(data, models):
+    model = models["model"]
+    criterion = models["criterion"]
     model.eval()
     out = model(data)
-    pred = out.argmax(dim=1)  # Use the class with highest probability.
-    val_correct = pred[data.val_mask] == data.y[data.val_mask]  # Check against ground-truth labels.
-    val_acc = int(val_correct.sum()) / int(data.val_mask.sum())  # Derive ratio of correct predictions.
-    return val_acc
-
-
-def cal_nei_index(ei, k, num_nodes, include_self=1):
-    if include_self:
-        neigh_dict = [k_hop_subgraph(node_idx=id, num_hops=k, edge_index=ei, num_nodes=num_nodes)[0] for id in range(num_nodes)]
-    else:
-        neigh_dict = [k_hop_subgraph(node_idx=id, num_hops=k, edge_index=ei, num_nodes=num_nodes)[0][1:] for id in range(num_nodes)]
-    return neigh_dict
-
-def cal_nc(nei_dict, y, thres=2.):
-    device = y.device
-    n = y.shape[0]
-    
-    # 收集所有非空邻居及其对应的i索引
-    all_neigh_list = []
-    i_indices_list = []
-    for i in range(n):
-        neigh = nei_dict[i]
-        if len(neigh) > 0:
-            all_neigh_list.append(neigh)
-            i_indices_list.append(torch.full((len(neigh),), i, dtype=torch.long, device=device))
-        
-    if not all_neigh_list:  # 所有邻居都为空
-        nc = torch.ones(n, device=device)
-    else:
-        all_neigh = torch.cat(all_neigh_list)
-        i_indices = torch.cat(i_indices_list)
-            
-        # 获取所有邻居的标签并计算类别统计
-        all_labels = y[all_neigh]
-        sum_per_class = torch_scatter.scatter_add(all_labels, i_indices, dim=0, dim_size=n)
-        max_counts = sum_per_class.max(dim=1).values
-            
-        # 计算每个节点的邻居数量
-        k = torch.tensor([len(nei_dict[i]) for i in range(n)], dtype=torch.float, device=device)
-            
-        # 计算NC值并处理空邻居情况
-        nc = torch.where(k > 0, k / max_counts, torch.tensor(1.0, device=device))
-        
-    mask = (nc <= thres).float().to(device)
-    
-    return mask
+    val_loss = criterion(out[data.val_mask], data.y[data.val_mask])
+    val_acc = accuracy(out[data.val_mask], data.y[data.val_mask])
+    val_bacc = bacc(out, data.y, data.val_mask)
+    val_maf1 = macro_f1(out, data.y, data.val_mask)
+    return val_loss, val_acc, val_bacc, val_maf1
 
 def load_ncgnn_models(num_features, num_classes, args, device):
     model = NCGCN(num_features, num_classes, args).to(device)
@@ -139,24 +135,55 @@ def load_ncgnn_datas(args, device, num_nodes, num_classes, data):
     
     t2 = time.time()
     print("load datas time:",t2-t1)
+    
+    # TODO: 还要 data.tail_mask
     return data
 
+def train_ncgnn_model(args, logger, data, models, best_acc, best_loss):
+    best_flag = False
+
+    t1 = time.time()
+    loss, out = train(data, models)
+    train_acc = accuracy(out[data.train_mask], data.y[data.train_mask])
+    data.update_cc = False
+    val_loss, val_acc, val_bacc, val_maf1 = valid(data, models)
+
+    if val_acc > best_acc:
+        logger.info('New best valid accuracy of backbone')
+        best_acc, best_loss = val_acc, val_loss
+        best_flag = True
+
+        predict = run_full_data(data, models, args.forcing)
+        neigh_dict = cal_nei_index(data.edge_index, args.hops, num_nodes)
+        data.cc_mask = cal_nc(neigh_dict, predict.detach(), args.threshold) # 缓存上一次的
+        data.update_cc = True
+    else:
+        best_flag = False
+
+    t2 = time.time()
+    epoch_time = t2 - t1
+    log = f'Backbone epoch: {epoch + 1:d} loss_train: {loss.item():.4f} loss_val: {val_loss:.4f} train_acc: {train_acc:.4f} valid_acc: {val_acc:.4f} valid_macrof1: {val_maf1:.4f} valid_bacc: {val_bacc:.4f} time: {epoch_time:.3f}'
+    logger.info(log)
+    return best_acc, best_loss, best_flag
+
 if __name__ == "__main__":
+    warnings.filterwarnings("ignore")
     args = get_ncgnn_args()
-
     num_nodes, num_classes, num_features, data = DataLoader(args.dataset)
-
     # print(data) # x,y,edge_index
     # print(data.x.dtype) # torch.float32
     # print(data.y.dtype) # torch.int64
     # print(data.edge_index.dtype) # torch.int64
     # print(f"load {args.dataset} successfully!")
     # print('==============================================================')
-    # warnings.filterwarnings("ignore")
+    
     args_dict = vars(args)
     args = argparse.Namespace(**args_dict)
     args.threshold = 2 ** (args.threshold / 10 * np.log2(num_classes))
-    print(args)
+    
+    logger = start_logger()
+
+    logger.info(args)
 
     device = torch.device(f"cuda:{args.device}")
 
@@ -170,26 +197,34 @@ if __name__ == "__main__":
     accs, test_accs = [], []
     ep_list = []
     best_acc = 0.
+    best_loss = 1e9
     final_test_acc = 0.
-    # es_count = patience = 100
-    for epoch in range(500):
-        t1 = time.time()
-        loss, out = train(data)
-        data.update_cc = False
-        val_acc = valid(data)
-        test_acc = test(data)
-        if val_acc > best_acc:
-            # es_count = patience
-            best_acc = val_acc
-            final_test_acc = test_acc
-            predict = run_full_data(data, args.forcing)
-            neigh_dict = cal_nei_index(data.edge_index, args.hops, num_nodes)
-            data.cc_mask = cal_nc(neigh_dict, predict.detach(), args.threshold) # 缓存上一次的
-            data.update_cc = True
-        t2 = time.time()
-        print(f"Epoch: {epoch}, Loss: {loss:.4f}, Val Acc: {val_acc:.4f}, Test Acc: {test_acc:.4f}, Time: {t2 - t1:.4f}s")
-        # else:
-        #     es_count -= 1
-        # if es_count <= 0:
+    
+    best_bak_valacc = 0.0
+    best_bak_loss = 1e5
+
+    for epoch in range(args.epochs):
+        best_bak_valacc, best_bak_loss, best_flag = train_ncgnn_model(args, logger, data, models, best_bak_valacc, best_bak_loss)
+        test_results = test_ncgnn_model(logger, data, models)
+        # TODO: other backbone models
+        if 'best_test_results' not in locals() or best_flag is True:
+            best_test_results = test_results
+        # # TODO: Early stop Method
+        # if best_bak_valacc >= args.early_stop_acc:
         #     break
-    print("Test acc:",final_test_acc)
+
+    if 'best_test_results' in locals():
+        final_log = "Final Test set results (when valid_acc of backbone is best):\n" + \
+				"loss: {:.4f} ".format(best_test_results["loss"].item()) + \
+				"accuracy: {:.4f} ".format(best_test_results["acc"]) + \
+				"micro_f1: {:.4f} ".format(best_test_results["micro_f1"]) + \
+				"macro_f1: {:.4f} ".format(best_test_results["macro_f1"]) + \
+				"rocauc: {:.4f} ".format(best_test_results["rocauc"]) + \
+				"bacc: {:.4f} ".format(best_test_results["bacc"])
+        logger.info(final_log)
+
+    # best_acc, best_loss, best_flag = train_ncgnn_model(args, data, models, best_acc, best_loss)
+    # if best_flag:
+    #     test_results = test(data, models)
+
+    close_logger(logger)

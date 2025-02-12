@@ -190,16 +190,7 @@ if __name__ == "__main__":
     data = load_ncgnn_datas(args, device, num_nodes, num_classes, data)
 
     models = load_ncgnn_models(num_features, num_classes, args, device)
-    model = models["model"]
-    criterion = models["criterion"]
-    optimizer = models["optimizer"]
 
-    accs, test_accs = [], []
-    ep_list = []
-    best_acc = 0.
-    best_loss = 1e9
-    final_test_acc = 0.
-    
     best_bak_valacc = 0.0
     best_bak_loss = 1e5
 
@@ -222,9 +213,5 @@ if __name__ == "__main__":
 				"rocauc: {:.4f} ".format(best_test_results["rocauc"]) + \
 				"bacc: {:.4f} ".format(best_test_results["bacc"])
         logger.info(final_log)
-
-    # best_acc, best_loss, best_flag = train_ncgnn_model(args, data, models, best_acc, best_loss)
-    # if best_flag:
-    #     test_results = test(data, models)
 
     close_logger(logger)

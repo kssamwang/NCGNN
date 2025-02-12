@@ -3,11 +3,6 @@ import os
 import numpy as np
 import random
 
-
-# class Config:
-#     device = 'cuda:3' if torch.cuda.is_available() else 'cpu'
-
-
 def seed_everything(seed):
     #os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     random.seed(seed)

@@ -23,7 +23,7 @@ For all datasets, we adopt dense data splitting as in [20], i.e., randomly split
 
 #### 4.2 Code Execution
 ```bash
-python main.py -D computers -M NCGCN
+python main.py --dataset computers --model NCGCN --device 3 --lr 5e-2 --wd 5e-5 --dp1 0.2 --dp2 0.6 --hops 2 --addself 0 --threshold 0.7 --hidden 512
 ```
 
 #### 4.3 Hyper-parameter Space
